@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscador de Productos - MercadoLibre</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-center mb-8 text-blue-600">Buscador de Productos - MercadoLibre</h1>
+        
+        <!-- Search Form -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="flex gap-4">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="Ingrese el nombre del producto..."
+                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                <button 
+                    onclick="searchProducts()"
+                    class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition duration-200"
+                >
+                    Buscar
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="hidden">
+            <div class="flex justify-center items-center mb-6">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                <span class="ml-2">Buscando productos...</span>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div id="results" class="hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Resultados de la búsqueda</h2>
+                <button 
+                    onclick="downloadExcel()"
+                    class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition duration-200"
+                >
+                    Descargar Excel
+                </button>
+            </div>
+            <div id="productsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6">
+            <span id="errorMessage"></span>
+        </div>
+    </div>
+
+    <script>
+        let searchResults = [];
+
+        async function searchProducts() {
+            const searchInput = document.getElementById('searchInput');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const error = document.getElementById('error');
+            const productsGrid = document.getElementById('productsGrid');
+
+            // Validate input
+            if (!searchInput.value.trim()) {
+                showError('Por favor ingrese un término de búsqueda');
+                return;
+            }
+
+            // Show loading, hide other elements
+            loading.classList.remove('hidden');
+            results.classList.add('hidden');
+            error.classList.add('hidden');
+            
+            try {
+                const response = await fetch('http://localhost:5000/api/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        producto: searchInput.value.trim()
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Error al buscar productos');
+                }
+
+                searchResults = data.data;
+                displayResults(searchResults);
+                results.classList.remove('hidden');
+            } catch (err) {
+                showError(err.message);
+                searchResults = [];
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        function displayResults(products) {
+            const productsGrid = document.getElementById('productsGrid');
+            productsGrid.innerHTML = '';
+
+            products.forEach(product => {
+                const productCard = document.createElement('div');
+                productCard.className = 'bg-white rounded-lg shadow-md p-4';
+                productCard.innerHTML = `
+                    <img src="${product.imagen_url}" alt="${product.producto}" class="w-full h-48 object-contain mb-4">
+                    <h3 class="font-semibold text-lg mb-2">${product.producto}</h3>
+                    <div class="text-gray-600 mb-2">
+                        <p>Precio: $${product.precio_original.toLocaleString()}</p>
+                        ${product.descuento > 0 ? `<p class="text-green-600">Descuento: ${product.descuento}%</p>` : ''}
+                    </div>
+                    <div class="text-sm text-gray-500">
+                        <p>Vendedor: ${product.vendedor}</p>
+                        ${product.envio_gratis ? '<p class="text-green-600">Envío gratis</p>' : ''}
+                    </div>
+                    <a href="${product.url_producto}" target="_blank" class="text-blue-500 hover:underline text-sm block mt-2">Ver en MercadoLibre</a>
+                `;
+                productsGrid.appendChild(productCard);
+            });
+        }
+
+        async function downloadExcel() {
+            if (searchResults.length === 0) {
+                showError('No hay resultados para descargar');
+                return;
+            }
+
+            try {
+                const response = await fetch('http://localhost:5000/api/download-excel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        productos: searchResults
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Error al generar el archivo Excel');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `productos_mercadolibre_${new Date().toISOString().slice(0,10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            error.classList.remove('hidden');
+        }
+
+        // Allow searching by pressing Enter
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchProducts();
+            }
+        });
+    </script>
+</body>
+</html>
